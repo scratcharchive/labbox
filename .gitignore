@@ -1,0 +1,5 @@
+*.tgz
+node_modules
+lib
+__pycache__
+*.egg-info
