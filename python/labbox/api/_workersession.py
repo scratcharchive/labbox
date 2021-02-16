@@ -34,7 +34,7 @@ class WorkerSession:
         self._default_job_cache = job_cache
         self._labbox_context = LabboxContext(worker_session=self)
 
-        self._default_feed_id = kp.get_feed_id('labbox-ephys-default', create=True)
+        self._default_feed_id = kp.get_feed_id(os.environ['LABBOX_DEFAULT_FEED_NAME'], create=True)
         self._feed = None
         self._subfeed_positions = {}
         self._feed_uri = None

@@ -6,7 +6,7 @@ from aiohttp import web
 import aiohttp_cors
 import kachery as ka
 thisdir = os.path.dirname(os.path.realpath(__file__))
-os.environ['LABBOX_EPHYS_PYTHON_MODULE_DIR'] = f'{thisdir}/../labbox_ephys'
+
 
 # # this is how the python functions in the extensions get registered
 labbox_extensions_dir = os.environ['LABBOX_EXTENSIONS_DIR']
@@ -28,15 +28,15 @@ import yaml
 import hither as hi
 import kachery_p2p as kp
 import websockets
-from labbox_ephys.api._session import Session
+from labbox.api import Session
 
 def main():
-    config_path_or_url = os.environ.get('LABBOX_EPHYS_CONFIG', None)
+    config_path_or_url = os.environ.get('LABBOX_CONFIG', None)
     if config_path_or_url is None:
         default_config_path = f'{thisdir}/../../labbox_config.yml'
         if os.path.exists(default_config_path):
             config_path_or_url = default_config_path
-    print(f"LABBOX_EPHYS_CONFIG: {config_path_or_url}")
+    print(f"LABBOX_CONFIG: {config_path_or_url}")
     if config_path_or_url:
         labbox_config = load_config(config_path_or_url)
     else:
@@ -70,7 +70,7 @@ def main():
     nodes_with_access = labbox_config.get('nodes_with_access', [])
     while True:
         try:
-            default_feed = kp.load_feed('labbox-ephys-default', create=True)
+            default_feed = kp.load_feed(os.environ['LABBOX_DEFAULT_FEED_NAME'], create=True)
             break
         except:
             print('Unable to load feed. Perhaps daemon is not running yet. Trying again in a few seconds.')
