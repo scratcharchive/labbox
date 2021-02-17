@@ -7,15 +7,15 @@ class ApiConnection {
     _isDisconnected = false // once disconnected, cannot reconnect - need to create a new instance
     _queuedMessages: any[] = []
 
-    constructor() {
+    constructor(private websocketUrl?: string) {
         this._start();
         this._connect()
     }
     _connect() {
-        const url = `ws://${window.location.hostname}:15308`;
-        this._ws = new WebSocket(url);
+        const url = this.websocketUrl;
+        this._ws = url ? new WebSocket(url) : null;
         console.log(this._ws);
-        this._ws.addEventListener('open', () => {
+        if (this._ws) this._ws.addEventListener('open', () => {
             this._isConnected = true;
             this._isDisconnected = false;
             const qm = this._queuedMessages;
@@ -25,7 +25,7 @@ class ApiConnection {
             }
             this._onConnectCallbacks.forEach(cb => cb());
         });
-        this._ws.addEventListener('message', evt => {
+        if (this._ws) this._ws.addEventListener('message', evt => {
             const x = JSON.parse(evt.data);
             if (!Array.isArray(x)) {
                 console.warn(x)
@@ -37,7 +37,7 @@ class ApiConnection {
                 this._onMessageCallbacks.forEach(cb => cb(m))
             }
         });
-        this._ws.addEventListener('close', () => {
+        if (this._ws) this._ws.addEventListener('close', () => {
             console.warn('Websocket disconnected.');
             this._isConnected = false;
             this._isDisconnected = true;

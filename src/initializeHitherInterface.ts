@@ -27,7 +27,7 @@ interface HitherJobCreatedMessageFromServer {
     job_id: string
 }
 
-const initializeHitherInterface = (baseSha1Url: string) => {
+const initializeHitherInterface = (baseSha1Url?: string) => {
     const globalData: {
         // dispatch: Dispatch<RootAction> | null,
         hitherClientJobCache: { [key: string]: ClientHitherJob },
@@ -187,20 +187,24 @@ const initializeHitherInterface = (baseSha1Url: string) => {
             return;
         }
         const result_sha1 = msg.result_sha1
-        // const url = `http://${window.location.hostname}:15309/sha1/${result_sha1}`;
-        const url = `${baseSha1Url}/${result_sha1}`
-        axios.get(url).then((result) => {
-            job._handleHitherJobFinished({
-                result: result.data,
-                runtime_info: msg.runtime_info
+        const url = baseSha1Url ? `${baseSha1Url}/${result_sha1}` : undefined
+        if (url) {
+            axios.get(url).then((result) => {
+                job._handleHitherJobFinished({
+                    result: result.data,
+                    runtime_info: msg.runtime_info
+                })
             })
-        })
             .catch((err: Error) => {
                 job._handleHitherJobError({
                     errorString: `Problem retrieving result: ${err.message}`,
                     runtime_info: msg.runtime_info
                 })
             })
+        }
+        else {
+            console.warn('Unable to get result because baseSha1Url is not defined')
+        }
         // dispatchUpdateHitherJob({clientJobId: job.clientJobId(), update: job.object()});
     }
     const handleHitherJobError = (msg: any) => {

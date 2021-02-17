@@ -132,7 +132,7 @@ def main():
         for task in pending:
             task.cancel()
 
-    start_server = websockets.serve(connection_handler, '0.0.0.0', 15308)
+    start_server = websockets.serve(connection_handler, '0.0.0.0', int(os.environ['LABBOX_WEBSOCKET_PORT'])) # 15308
 
     asyncio.get_event_loop().run_until_complete(start_server)
 
@@ -166,7 +166,7 @@ def main():
             )
         })
     # app.add_routes(routes)
-    web.run_app(app, port=15309)
+    web.run_app(app, port=int(os.environ['LABBOX_HTTP_PORT'])) # 15309
 
     # asyncio.get_event_loop().run_forever()
 
