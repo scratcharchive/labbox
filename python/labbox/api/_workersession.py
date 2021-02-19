@@ -1,7 +1,8 @@
 import os
 import json
+import time
 import hashlib
-from typing import Union
+from typing import Dict, Set, Union
 
 import hither as hi
 import kachery as ka
@@ -35,19 +36,11 @@ class WorkerSession:
         self._labbox_context = LabboxContext(worker_session=self)
 
         self._default_feed_id = kp.get_feed_id(os.environ['LABBOX_DEFAULT_FEED_NAME'], create=True)
-        self._feed = None
-        self._subfeed_positions = {}
-        self._feed_uri = None
-        self._workspace_name = None
-        self._readonly = None
+        self._readonly = False
         self._jobs_by_id = {}
         self._remote_job_handlers = {}
         self._on_messages_callbacks = []
-        self._queued_document_action_messages = []
-        self._additional_subfeed_watches = []
-        self._workspace_subfeed_watches = []
-
-        self._initial_subfeed_load_complete = False
+        self._subfeed_message_requests = {}
 
     def initialize(self):
         node_id = kp.get_node_id()
@@ -67,40 +60,7 @@ class WorkerSession:
         pass
     def handle_message(self, msg):
         type0 = msg.get('type')
-        if type0 == 'reportClientInfo':
-            print('reported client info:', msg)
-            self._feed_uri = msg['clientInfo']['feedUri']
-            self._workspace_name = msg['clientInfo']['workspaceName']
-            self._readonly = msg['clientInfo']['readOnly']
-            if not self._feed_uri:
-                self._feed_uri = 'feed://' + self._default_feed_id
-            self._feed = kp.load_feed(self._feed_uri)
-            if self._feed:
-                qm = self._queued_document_action_messages
-                self._queued_document_action_messages = []
-                for m in qm:
-                    self.handle_message(m)
-        elif type0 == 'addSubfeedWatch':
-            feed_uri = msg['feedUri']
-            if not feed_uri:
-                feed_uri = 'feed://' + self._default_feed_id
-            self.add_subfeed_watch(
-                watch_name=msg['watchName'],
-                feed_uri=feed_uri,
-                subfeed_name=msg['subfeedName'],
-                position=msg.get('position', 0)
-            )
-        elif type0 == 'addWorkspaceSubfeedWatch':
-            self.add_workspace_subfeed_watch(
-                watch_name=msg['watchName'],
-                position=msg.get('position', 0)
-            )
-        elif type0 == 'appendWorkspaceSubfeedMessage':
-            message = msg['message']
-            subfeed_name = {'workspaceName': self._workspace_name}
-            subfeed = self._feed.get_subfeed(subfeed_name)
-            subfeed.append_message(message)
-        elif type0 == 'hitherCreateJob':
+        if type0 == 'hitherCreateJob':
             functionName = msg['functionName']
             kwargs = msg['kwargs']
             client_job_id = msg['clientJobId']
@@ -153,41 +113,65 @@ class WorkerSession:
             assert job_id in self._jobs_by_id, f'No job with id: {job_id}'
             job = self._jobs_by_id[job_id]
             job.cancel()
+        elif type0 == 'subfeedMessageRequest':
+            request_id = msg['requestId']
+            feed_uri = msg['feedUri']
+            if not feed_uri: feed_uri = 'feed://' + self._default_feed_id
+            subfeed_name = msg['subfeedName']
+            position = msg['position']
+            wait_msec = msg['waitMsec']
+            self._subfeed_message_requests[request_id] = {
+                'feed_uri': feed_uri,
+                'subfeed_name': subfeed_name,
+                'position': position,
+                'wait_msec': wait_msec,
+                'timestamp': time.time()
+            }
+
     def iterate(self):
-        subfeed_msgs = []
         while True:
             found_something = False
-            subfeed_watches = {}
-            for w in self._additional_subfeed_watches:
-                subfeed_watches[w['watch_name']] = {
-                    'position': self._subfeed_positions[w['watch_name']],
-                    'feedId': _feed_id_from_uri(w['feed_uri']),
-                    'subfeedHash': _subfeed_hash_from_name(w['subfeed_name'])
-                }
-            for w in self._workspace_subfeed_watches:
-                if self._feed_uri is not None:
-                    subfeed_watches[w['watch_name']] = {
-                        'position': self._subfeed_positions[w['watch_name']],
-                        'feedId': _feed_id_from_uri(self._feed_uri),
-                        'subfeedHash': _subfeed_hash_from_name({'workspaceName': self._workspace_name})
+            subfeed_message_request_ids = list(self._subfeed_message_requests.keys())
+            if len(subfeed_message_request_ids) > 0:
+                msgs_for_client = []
+                subfeed_watches = {}
+                for smr_id in subfeed_message_request_ids:
+                    smr = self._subfeed_message_requests[smr_id]
+                    subfeed_watches[smr_id] = {
+                        'position': smr['position'],
+                        'feedId': _feed_id_from_uri(smr['feed_uri']),
+                        'subfeedHash': _subfeed_hash_from_name(smr['subfeed_name'])
                     }
-            if len(subfeed_watches.keys()) > 0:
                 messages = kp.watch_for_new_messages(subfeed_watches=subfeed_watches, wait_msec=100)
-                for key in messages.keys():
-                    if len(messages[key]) > 0:
+                resolved_subfeed_message_requests: Set[str] = set()
+                for watch_name in messages.keys():
+                    num_new_messages = len(messages[watch_name])
+                    if num_new_messages > 0:
                         found_something = True
-                        for m in messages[key]:
-                            subfeed_msgs.append({'type': 'subfeedMessage', 'watchName': key, 'message': m})
-                    self._subfeed_positions[key] = self._subfeed_positions[key] + len(messages[key])
+                        msgs_for_client.append({
+                            'type': 'subfeedMessageRequestResponse',
+                            'requestId': watch_name,
+                            'numNewMessages': num_new_messages
+                        })
+                        resolved_subfeed_message_requests.add(watch_name)
+                for smr_id in subfeed_message_request_ids:
+                    if not smr_id in resolved_subfeed_message_requests:
+                        smr = self._subfeed_message_requests[smr_id]
+                        elapsed_msec = (time.time() - smr['timestamp']) * 1000
+                        if elapsed_msec > smr['wait_msec']:
+                            msgs_for_client.append({
+                                'type': 'subfeedMessageRequestResponse',
+                                'requestId': watch_name,
+                                'numNewMessages': 0
+                            })
+                            resolved_subfeed_message_requests.add(watch_name)
+                
+                if len(msgs_for_client) > 0:
+                    self._send_messages(msgs_for_client)
+                    for smr_id in resolved_subfeed_message_requests:
+                        del self._subfeed_message_requests[smr_id]
             if not found_something:
                 break
-        if len(subfeed_msgs) > 0:
-            self._send_messages(subfeed_msgs)
-        if not self._initial_subfeed_load_complete and (self._feed_uri is not None):
-            self._initial_subfeed_load_complete = True
-            self._send_message({
-                'type': 'reportInitialLoadComplete'
-            })
         
         hi.wait(0)
         job_ids = list(self._jobs_by_id.keys())
@@ -222,18 +206,6 @@ class WorkerSession:
                 self._send_message(msg)
     def on_messages(self, callback):
         self._on_messages_callbacks.append(callback)
-    def add_subfeed_watch(self, *, watch_name: str, feed_uri: str, subfeed_name: Union[str, dict], position=0):
-        self._additional_subfeed_watches.append(dict(
-            watch_name=watch_name,
-            feed_uri=feed_uri,
-            subfeed_name=subfeed_name
-        ))
-        self._subfeed_positions[watch_name] = position
-    def add_workspace_subfeed_watch(self, *, watch_name: str, position=0):
-        self._workspace_subfeed_watches.append(dict(
-            watch_name=watch_name
-        ))
-        self._subfeed_positions[watch_name] = position
     def _send_message(self, msg):
         for cb in self._on_messages_callbacks:
             cb([msg])
@@ -287,6 +259,11 @@ def _is_jsonable(x) -> bool:
 def _feed_id_from_uri(uri: str):
     a = uri.split('/')
     return a[2]
+
+def _subfeed_hash_from_uri(uri: str):
+    a = uri.split('/')
+    n = a[3]
+    return _subfeed_hash_from_name(n)
 
 def _subfeed_hash_from_name(subfeed_name: Union[str, dict]):
     if isinstance(subfeed_name, str):

@@ -5,12 +5,7 @@ export type { CalculationPool, HitherInterface } from './hither';
 export { default as initializeHitherInterface } from './initializeHitherInterface';
 export { LabboxProvider, LabboxProviderContext } from './LabboxProvider';
 export { default as usePlugins } from './usePlugins';
-
-export interface WorkspaceInfo {
-    workspaceName: string | null
-    feedUri: string | null
-    readOnly: boolean | null
-}
+export { default as useSubfeed } from './useSubfeed';
 
 export interface BasePlugin {
     type: string

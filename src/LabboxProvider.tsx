@@ -1,28 +1,10 @@
+import axios from 'axios';
 import React, { createContext, FunctionComponent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { BasePlugin, WorkspaceInfo } from '.';
+import { BasePlugin } from '.';
 import ApiConnection from './ApiConnection';
 import { HitherContext } from './hither';
 import initializeHitherInterface from './initializeHitherInterface';
-import { AppendOnlyLog, dummyAppendOnlyLog } from './useFeedReducer';
-import WorkspaceSubfeed from './WorkspaceSubfeed';
 export type { CalculationPool } from './hither';
-
-export const LabboxProviderContext = createContext<{
-    plugins: BasePlugin[]
-    websocketStatus: 'connected' | 'disconnected' | 'waiting',
-    serverInfo: ServerInfo | null
-    initialLoadComplete: boolean
-    workspaceInfo?: WorkspaceInfo
-    workspaceSubfeed: AppendOnlyLog
-    onReconnectWebsocket: () => void
-}>({
-    plugins: [],
-    websocketStatus: 'waiting',
-    serverInfo: null,
-    initialLoadComplete: false,
-    workspaceSubfeed: dummyAppendOnlyLog,
-    onReconnectWebsocket: () => { }
-})
 
 export class ExtensionContextImpl<Plugin extends BasePlugin> {
     plugins: Plugin[] = []
@@ -101,69 +83,49 @@ const useHitherInterface = (apiConnection: ApiConnection, apiConfig: ApiConfig |
     const state = useRef<{ queuedHitherJobMessages: any[] }>({ queuedHitherJobMessages: [] })
     const hither = useMemo(() => {
         const y = initializeHitherInterface(apiConfig?.baseSha1Url)
-        if (!apiConfig?.jupyterMode) {
-            y._registerSendMessage((msg) => {
-                if (!apiConnection.isDisconnected()) {
-                    apiConnection.sendMessage(msg)
-                }
-                else {
-                    // being disconnected is not the same as not being connected
-                    // if connection has not yet been established, then the message will be queued in the apiConnection
-                    // but if disconnected, we will handle queuing here
+        
+        y._registerSendMessage((msg) => {
+            if (!apiConnection.isDisconnected()) {
+                apiConnection.sendMessage(msg)
+            }
+            else {
+                // being disconnected is not the same as not being connected
+                // if connection has not yet been established, then the message will be queued in the apiConnection
+                // but if disconnected, we will handle queuing here
+                state.current.queuedHitherJobMessages.push(msg)
+                if (msg.type === 'hitherCreateJob') {
                     state.current.queuedHitherJobMessages.push(msg)
-                    if (msg.type === 'hitherCreateJob') {
-                        state.current.queuedHitherJobMessages.push(msg)
-                    }
                 }
+            }
+        })
+        apiConnection.onMessage(msg => {
+            const type0 = msg.type;
+            if (type0 === 'hitherJobFinished') {
+                y.handleHitherJobFinished(msg);
+            }
+            else if (type0 === 'hitherJobError') {
+                y.handleHitherJobError(msg);
+            }
+            else if (type0 === 'hitherJobCreated') {
+                y.handleHitherJobCreated(msg);
+            }
+        });
+        apiConnection.onConnect(() => {
+            console.info('Connected to API server')
+            state.current.queuedHitherJobMessages.forEach(msg => {
+                apiConnection.sendMessage(msg)
             })
-            apiConnection.onMessage(msg => {
-                const type0 = msg.type;
-                if (type0 === 'hitherJobFinished') {
-                    y.handleHitherJobFinished(msg);
-                }
-                else if (type0 === 'hitherJobError') {
-                    y.handleHitherJobError(msg);
-                }
-                else if (type0 === 'hitherJobCreated') {
-                    y.handleHitherJobCreated(msg);
-                }
-            });
-            apiConnection.onConnect(() => {
-                console.info('Connected to API server')
-                state.current.queuedHitherJobMessages.forEach(msg => {
-                    apiConnection.sendMessage(msg)
-                })
-                state.current.queuedHitherJobMessages = []
-            })
-        }
-        else {
+            state.current.queuedHitherJobMessages = []
+        })
+        if (apiConfig?.jupyterMode) {
             // jupyter mode
             let _iterating = false
             const model = apiConfig.jupyterModel
             if (!model) throw Error('No jupyter model.')
-            y._registerSendMessage(msg => {
-                console.info('SENDING MESSAGE', msg)
-                if (msg.type === 'hitherCreateJob') _startIterating(300)
-                model.send(msg, {})
-            })
             model.on('msg:custom', (msgs: any[]) => {
                 console.info('RECEIVED MESSAGES', msgs)
                 if (msgs.length > 0) {
                     _startIterating(300) // start iterating more often if we got a message from the server (because there's activity)
-                }
-                for (let msg of msgs) {
-                    if (msg.type === 'hitherJobCreated') {
-                        y.handleHitherJobCreated(msg)
-                    }
-                    else if (msg.type === 'hitherJobFinished') {
-                        y.handleHitherJobFinished(msg)
-                    }
-                    else if (msg.type === 'hitherJobError') {
-                        y.handleHitherJobError(msg)
-                    }
-                    else if (msg.type === 'debug') {
-                        console.info('DEBUG MESSAGE', msg)
-                    }
                 }
             })
             let _iterate_interval = 200
@@ -197,6 +159,7 @@ const useHitherInterface = (apiConnection: ApiConnection, apiConfig: ApiConfig |
 export type ApiConfig = {
     webSocketUrl: string // `ws://${window.location.hostname}:15308`
     baseSha1Url: string // `http://${window.location.hostname}:15309/sha1`
+    baseFeedUrl?: string // `http://${window.location.hostname}:15309/feed`
     jupyterMode?: boolean
     jupyterModel?: {
         send: (msg: any, o: any) => void
@@ -207,39 +170,129 @@ export type ApiConfig = {
 type Props = {
     children: React.ReactNode
     extensionContext: ExtensionContextImpl<any>
-    workspaceInfo?: WorkspaceInfo
     apiConfig?: ApiConfig
     status?: {active: boolean}
 }
 
-const useWorkspaceSubfeed = (apiConnection: ApiConnection, workspaceInfo?: WorkspaceInfo) => {
-    return useMemo(() => {
-        const x = new WorkspaceSubfeed(apiConnection)
-        if (workspaceInfo) x.initialize(workspaceInfo)
-        return x
-    }, [apiConnection, workspaceInfo])
+type SubfeedMessageRequest = {
+    requestId: string
+    feedUri: string
+    subfeedName: any
+    position: number
+    waitMsec: number
+    callback: (numNewMessages: number) => void
 }
 
-export const LabboxProvider: FunctionComponent<Props> = ({ children, extensionContext, workspaceInfo, apiConfig, status }) => {
-    const apiConnection = useMemo(() => (new ApiConnection(apiConfig?.webSocketUrl)), [apiConfig?.webSocketUrl])
+class SubfeedManager {
+    _subfeedMessageRequests: {[key: string]: SubfeedMessageRequest} = {}
+    constructor(private apiConnection: ApiConnection, private baseFeedUrl: string | undefined) {
+        apiConnection.onMessage(msg => {
+            if (msg.type === 'subfeedMessageRequestResponse') {
+                const requestId = msg.requestId as string
+                const numNewMessages = msg.numNewMessages as number
+                if (requestId in this._subfeedMessageRequests) {
+                    const cb = this._subfeedMessageRequests[requestId].callback
+                    delete this._subfeedMessageRequests[requestId]
+                    cb(numNewMessages)
+                }
+            }
+        })
+    }
+    async getMessages(a: {feedUri: string, subfeedName: any, position: number, waitMsec: number}): Promise<any[]> {
+        const url = `${this.baseFeedUrl}/getMessages`
+        const { feedUri, subfeedName, position, waitMsec } = a
+        const result = await axios.post(url, {feedUri, subfeedName, position, waitMsec})
+        const messages = result.data as any[]
+        if (messages.length > 0) {
+            return messages
+        }
+        if (waitMsec > 0) {
+            return new Promise((resolve, reject) => {
+                let completed = false
+                const req: SubfeedMessageRequest = {
+                    requestId: randomString(10),
+                    feedUri,
+                    subfeedName,
+                    position,
+                    waitMsec,
+                    callback: (numNewMessages: number) => {
+                        if (numNewMessages > 0) {
+                            this.getMessages({feedUri, subfeedName, position, waitMsec: 0}).then(messages => {
+                                if (completed) return
+                                completed = true
+                                resolve(messages)
+                            }).catch(err => {
+                                if (completed) return
+                                completed = true
+                                reject(err)
+                            })
+                        }
+                        else {
+                            completed = true
+                            resolve([])
+                        }
+                    }
+                }
+                this._subfeedMessageRequests[req.requestId] = req
+                this.apiConnection.sendMessage({
+                    type: 'subfeedMessageRequest',
+                    requestId: req.requestId,
+                    feedUri: req.feedUri,
+                    subfeedName: req.subfeedName,
+                    position: req.position,
+                    waitMsec: req.waitMsec
+                })
+                setTimeout(() => {
+                    if (!completed) {
+                        console.warn('Did not get the expected response for subfeed message request')
+                        completed = true
+                        resolve([])
+                    }
+                }, waitMsec + 2000)
+            })
+        }
+        else return []
+    }
+    async appendMessages(a: {feedUri: string, subfeedName: any, messages: any[]}) {
+        const { feedUri, subfeedName, messages } = a
+        const url = `${this.baseFeedUrl}/appendMessages`
+        await axios.post(url, {feedUri, subfeedName, messages})
+    }
+}
+
+export const LabboxProviderContext = createContext<{
+    plugins: BasePlugin[]
+    websocketStatus: 'connected' | 'disconnected' | 'waiting',
+    serverInfo: ServerInfo | null
+    initialLoadComplete: boolean
+    subfeedManager?: SubfeedManager
+    onReconnectWebsocket: () => void
+}>({
+    plugins: [],
+    websocketStatus: 'waiting',
+    serverInfo: null,
+    initialLoadComplete: false,
+    onReconnectWebsocket: () => { }
+})
+
+export const LabboxProvider: FunctionComponent<Props> = ({ children, extensionContext, apiConfig, status }) => {
+    const apiConnection = useMemo(() => (new ApiConnection(apiConfig)), [apiConfig])
     const websocketStatus = useWebsocketStatus(apiConnection)
     const serverInfo = useServerInfo(apiConnection)
     const initialLoadComplete = useInitialLoadComplete(apiConnection)
     const hither = useHitherInterface(apiConnection, apiConfig, status)
-    const workspaceSubfeed = useWorkspaceSubfeed(apiConnection, workspaceInfo)
+    const subfeedManager = useMemo(() => (new SubfeedManager(apiConnection, apiConfig?.baseFeedUrl)), [])
     const onReconnectWebsocket = useCallback(() => {
         apiConnection.reconnect()
-        if (workspaceInfo) workspaceSubfeed.initialize(workspaceInfo)
-    }, [apiConnection, workspaceSubfeed, workspaceInfo])
+    }, [apiConnection])
     const value = useMemo(() => ({
         plugins: extensionContext.plugins,
         websocketStatus,
         serverInfo,
         initialLoadComplete,
-        workspaceSubfeed,
-        workspaceInfo,
+        subfeedManager,
         onReconnectWebsocket
-    }), [extensionContext.plugins, websocketStatus, serverInfo, initialLoadComplete, onReconnectWebsocket, workspaceSubfeed, workspaceInfo])
+    }), [extensionContext.plugins, websocketStatus, serverInfo, initialLoadComplete, onReconnectWebsocket])
     return (
         <LabboxProviderContext.Provider value={value}>
             <HitherContext.Provider value={hither}>
@@ -247,6 +300,14 @@ export const LabboxProvider: FunctionComponent<Props> = ({ children, extensionCo
             </HitherContext.Provider>
         </LabboxProviderContext.Provider>
     )
+}
+
+function randomString(num_chars: number) {
+    var text = "";
+    var possible = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+    for (var i = 0; i < num_chars; i++)
+        text += possible.charAt(Math.floor(Math.random() * possible.length));
+    return text;
 }
 
 const sleepMsec = (m: number) => new Promise(r => setTimeout(r, m));

@@ -1,3 +1,5 @@
+import { ApiConfig } from "./LabboxProvider"
+
 class ApiConnection {
     _ws: WebSocket | null = null
     _isConnected: boolean = false
@@ -7,42 +9,59 @@ class ApiConnection {
     _isDisconnected = false // once disconnected, cannot reconnect - need to create a new instance
     _queuedMessages: any[] = []
 
-    constructor(private websocketUrl?: string) {
+    constructor(private apiConfig: ApiConfig | undefined) {
         this._start();
         this._connect()
     }
     _connect() {
-        const url = this.websocketUrl;
-        this._ws = url ? new WebSocket(url) : null;
-        console.log(this._ws);
-        if (this._ws) this._ws.addEventListener('open', () => {
-            this._isConnected = true;
-            this._isDisconnected = false;
-            const qm = this._queuedMessages;
-            this._queuedMessages = [];
-            for (let m of qm) {
-                this.sendMessage(m);
-            }
-            this._onConnectCallbacks.forEach(cb => cb());
-        });
-        if (this._ws) this._ws.addEventListener('message', evt => {
-            const x = JSON.parse(evt.data);
-            if (!Array.isArray(x)) {
-                console.warn(x)
-                console.warn('Error getting message, expected a list')
-                return
-            }
-            console.info('INCOMING MESSAGES', x);
-            for (const m of x) {
-                this._onMessageCallbacks.forEach(cb => cb(m))
-            }
-        });
-        if (this._ws) this._ws.addEventListener('close', () => {
-            console.warn('Websocket disconnected.');
-            this._isConnected = false;
-            this._isDisconnected = true;
-            this._onDisconnectCallbacks.forEach(cb => cb())
-        })
+        const apiConfig = this.apiConfig
+        if (!apiConfig) return
+        if (apiConfig.jupyterMode) {
+            const model = apiConfig.jupyterModel
+            if (!model) throw Error('No jupyter model.')
+            model.on('msg:custom', (msgs: any[]) => {
+                for (const m of msgs) {
+                    this._onMessageCallbacks.forEach(cb => cb(m))
+                }
+            })
+            this._isConnected = true
+            this._onConnectCallbacks.forEach(cb => cb())
+        }
+        else {
+            const url = apiConfig.webSocketUrl;
+            if (!url) throw Error('No webSocketUrl')
+            const ws = new WebSocket(url)
+            this._ws = ws
+            console.log(ws);
+            ws.addEventListener('open', () => {
+                this._isConnected = true;
+                this._isDisconnected = false;
+                const qm = this._queuedMessages;
+                this._queuedMessages = [];
+                for (let m of qm) {
+                    this.sendMessage(m);
+                }
+                this._onConnectCallbacks.forEach(cb => cb());
+            });
+            ws.addEventListener('message', evt => {
+                const x = JSON.parse(evt.data);
+                if (!Array.isArray(x)) {
+                    console.warn(x)
+                    console.warn('Error getting message, expected a list')
+                    return
+                }
+                console.info('INCOMING MESSAGES', x);
+                for (const m of x) {
+                    this._onMessageCallbacks.forEach(cb => cb(m))
+                }
+            });
+            ws.addEventListener('close', () => {
+                console.warn('Websocket disconnected.');
+                this._isConnected = false;
+                this._isDisconnected = true;
+                this._onDisconnectCallbacks.forEach(cb => cb())
+            })
+        }
     }
     reconnect() {
         if (!this._isDisconnected) {
@@ -72,13 +91,23 @@ class ApiConnection {
         return this._isConnected
     }
     sendMessage(msg: any) {
-        if ((!this._isConnected) && (!this._isDisconnected)) {
-            this._queuedMessages.push(msg);
-            return;
+        const apiConfig = this.apiConfig
+        if (!apiConfig) return
+        if (apiConfig.jupyterMode) {
+            const model = apiConfig.jupyterModel
+            if (!model) throw Error('No jupyter model.')
+            console.info('OUTGOING MESSAGE (jupyter)', msg);
+            model.send(msg, {})
         }
-        if (!this._ws) throw Error('Unexpected: _ws is null')
-        console.info('OUTGOING MESSAGE', msg);
-        this._ws.send(JSON.stringify(msg));
+        else {
+            if ((!this._isConnected) && (!this._isDisconnected)) {
+                this._queuedMessages.push(msg);
+                return;
+            }
+            if (!this._ws) throw Error('Unexpected: _ws is null')
+            console.info('OUTGOING MESSAGE', msg);
+            this._ws.send(JSON.stringify(msg));
+        }
     }
     async _start() {
         while (true) {
