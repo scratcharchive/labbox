@@ -1,19 +1,21 @@
 {
   "name": "labbox",
-  "version": "0.1.16",
+  "version": "0.1.17",
   "description": "",
   "main": "lib/index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "build": "tsc"
+    "build": "tsc",
+    "publish-dry": "npm publish --dry-run",
+    "publish-go": "npm publish"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "devDependencies": {
-    "typescript": "^4.1.5",
     "@types/object-hash": "^1.3.4",
-    "@types/react": "^17.0.2"
+    "@types/react": "^17.0.2",
+    "typescript": "^4.1.5"
   },
   "dependencies": {
     "axios": "^0.21.1",
