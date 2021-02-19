@@ -165,11 +165,10 @@ class WorkerSession:
                                 'numNewMessages': 0
                             })
                             resolved_subfeed_message_requests.add(watch_name)
-                
                 if len(msgs_for_client) > 0:
                     self._send_messages(msgs_for_client)
-                    for smr_id in resolved_subfeed_message_requests:
-                        del self._subfeed_message_requests[smr_id]
+                for smr_id in resolved_subfeed_message_requests:
+                    del self._subfeed_message_requests[smr_id]
             if not found_something:
                 break
         
