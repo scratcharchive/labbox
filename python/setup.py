@@ -5,7 +5,7 @@ import setuptools
 
 setuptools.setup(
     name='labbox',
-    version='0.1.19',
+    version='0.1.20',
     author="Jeremy Magland",
     author_email="jmagland@flatironinstitute.org",
     description="",
@@ -13,7 +13,8 @@ setuptools.setup(
     packages=setuptools.find_packages(),
     include_package_data=True,
     scripts=[
-        'bin/labbox_api'
+        'bin/labbox_start_api_websocket',
+        'bin/labbox_start_api_http'
     ],
     install_requires=[
         'numpy',

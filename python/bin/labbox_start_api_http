@@ -1,0 +1,91 @@
+#!/usr/bin/env python3
+
+import os
+from aiohttp import web
+import aiohttp_cors
+import kachery as ka
+import json
+import sys
+
+import kachery_p2p as kp
+from labbox.api import Session
+
+def main():
+    async def sha1_handler(request):
+        sha1 = str(request.rel_url).split('/')[2]
+        uri = 'sha1://' + sha1
+        txt = ka.load_text(uri)
+        if txt is not None:
+            return web.Response(text=txt)
+        else:
+            raise Exception(f'Not found: {uri}')
+    
+    async def feed_get_messages_handler(request):
+        x = await request.json()
+        feed_uri = x['feedUri']
+        subfeed_name = x['subfeedName']
+        position = x['position']
+        if feed_uri:
+            feed = kp.load_feed(feed_uri)
+        else:
+            feed = kp.load_feed(os.environ['LABBOX_DEFAULT_FEED_NAME'], create=True)
+        subfeed = feed.get_subfeed(subfeed_name)
+        subfeed.set_position(position)
+        messages = subfeed.get_next_messages(wait_msec=0) # important not to wait here because we don't want to tie up the limited http request connections
+        return web.Response(text=json.dumps(messages))
+    
+    async def feed_append_messages_handler(request):
+        x = await request.json()
+        messages = x['messages']
+        feed_uri = x['feedUri']
+        subfeed_name = x['subfeedName']
+        if feed_uri:
+            feed = kp.load_feed(feed_uri)
+        else:
+            feed = kp.load_feed(os.environ['LABBOX_DEFAULT_FEED_NAME'], create=True)
+        subfeed = feed.get_subfeed(subfeed_name)
+        subfeed.append_messages(messages)
+        return web.Response(text=json.dumps({'success': True}))
+
+    app = web.Application()
+    cors = aiohttp_cors.setup(app, defaults={
+            "*": aiohttp_cors.ResourceOptions(
+                    allow_credentials=True,
+                    expose_headers="*",
+                    allow_headers="*",
+                )
+        })
+    sha1_resource = cors.add(app.router.add_resource('/sha1/{sha1}'))
+    sha1_route = cors.add(
+        sha1_resource.add_route("GET", sha1_handler), {
+            "http://client.example.org": aiohttp_cors.ResourceOptions(
+                allow_credentials=True,
+                expose_headers=("X-Custom-Server-Header",),
+                allow_headers=("X-Requested-With", "Content-Type"),
+                max_age=3600,
+            )
+        })
+    feed_get_messages_resource = cors.add(app.router.add_resource('/feed/getMessages'))
+    feed_get_messages_route = cors.add(
+        feed_get_messages_resource.add_route("POST", feed_get_messages_handler), {
+            "http://client.example.org": aiohttp_cors.ResourceOptions(
+                allow_credentials=True,
+                expose_headers=("X-Custom-Server-Header",),
+                allow_headers=("X-Requested-With", "Content-Type"),
+                max_age=3600,
+            )
+        })
+    feed_append_messages_resource = cors.add(app.router.add_resource('/feed/appendMessages'))
+    feed_append_messages_route = cors.add(
+        feed_append_messages_resource.add_route("POST", feed_append_messages_handler), {
+            "http://client.example.org": aiohttp_cors.ResourceOptions(
+                allow_credentials=True,
+                expose_headers=("X-Custom-Server-Header",),
+                allow_headers=("X-Requested-With", "Content-Type"),
+                max_age=3600,
+            )
+        })
+    web.run_app(app, port=int(os.environ['LABBOX_HTTP_PORT'])) # 15309
+
+if __name__ == '__main__':
+    main()
