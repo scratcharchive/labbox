@@ -5,7 +5,7 @@ import setuptools
 
 setuptools.setup(
     name='labbox',
-    version='0.1.18',
+    version='0.1.19',
     author="Jeremy Magland",
     author_email="jmagland@flatironinstitute.org",
     description="",
@@ -18,7 +18,7 @@ setuptools.setup(
     install_requires=[
         'numpy',
         'hither>=0.4.2',
-        'kachery-p2p>=0.5.24',
+        'kachery-p2p>=0.6.2',
         'websockets',
         'pyyaml'
     ],
