@@ -116,8 +116,11 @@ def main():
         for task in pending:
             task.cancel()
 
-    start_server = websockets.serve(connection_handler, '0.0.0.0', int(os.environ['LABBOX_WEBSOCKET_PORT'])) # 15308
+    listen_port = int(os.environ['LABBOX_WEBSOCKET_PORT'])
+    start_server = websockets.serve(connection_handler, '0.0.0.0', listen_port)
 
+    asyncio.get_event_loop().run_until_complete(start_server)
+    print(f'Listening for websocket connections on port {listen_port}')
     asyncio.get_event_loop().run_forever()
 
 def cache_bust(url):
