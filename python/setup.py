@@ -5,7 +5,7 @@ import setuptools
 
 setuptools.setup(
     name='labbox',
-    version='0.1.21',
+    version='0.1.22',
     author="Jeremy Magland",
     author_email="jmagland@flatironinstitute.org",
     description="",
