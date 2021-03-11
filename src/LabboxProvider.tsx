@@ -1,4 +1,5 @@
 import axios from 'axios';
+import Cookie from 'js-cookie';
 import React, { createContext, FunctionComponent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { BasePlugin } from '.';
 import ApiConnection from './ApiConnection';
@@ -201,7 +202,8 @@ class SubfeedManager {
     async getMessages(a: {feedUri: string, subfeedName: any, position: number, waitMsec: number}): Promise<any[]> {
         const url = `${this.baseFeedUrl}/getMessages`
         const { feedUri, subfeedName, position, waitMsec } = a
-        const result = await axios.post(url, {feedUri, subfeedName, position, waitMsec})
+        const headers = this._postHeaders()
+        const result = await axios.post(url, {feedUri, subfeedName, position, waitMsec}, {headers})
         const messages = result.data as any[]
         if (messages.length > 0) {
             return messages
@@ -256,7 +258,17 @@ class SubfeedManager {
     async appendMessages(a: {feedUri: string, subfeedName: any, messages: any[]}) {
         const { feedUri, subfeedName, messages } = a
         const url = `${this.baseFeedUrl}/appendMessages`
-        await axios.post(url, {feedUri, subfeedName, messages})
+        const headers = this._postHeaders()
+        await axios.post(url, {feedUri, subfeedName, messages}, {headers})
+    }
+    _postHeaders() {
+        // see https://pypi.org/project/jupyter-openbis-server/
+        const xsrf_token = Cookie.get('_xsrf')
+        if (!xsrf_token) throw Error('No _xsrf cookie found')
+        return {
+            "X-XSRFToken": xsrf_token,
+            "credentials": "same-origin"
+        }
     }
 }
 
