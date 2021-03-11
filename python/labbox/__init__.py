@@ -1,4 +1,4 @@
-__version__ = "0.4.14"
+__version__ = "0.1.25"
 
 import os
 import sys
@@ -6,6 +6,9 @@ import sys
 from .api._workersession import WorkerSession
 from .serialize import serialize
 
-from .request_handlers import load_jupyter_server_extension
+try:
+    from .request_handlers import load_jupyter_server_extension
+except:
+    print('WARNING: unable to import load_jupyter_server_extension - okay if not using jupyterlab')
 
 dummy = 0
