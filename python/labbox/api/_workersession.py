@@ -9,16 +9,23 @@ import kachery as ka
 import kachery_p2p as kp
 import numpy as np
 
-job_cache_path = os.environ['KACHERY_STORAGE_DIR'] + '/job-cache'
-if not os.path.exists(job_cache_path):
-    os.mkdir(job_cache_path)
-job_cache=hi.JobCache(path=job_cache_path)
+_global = {
+    'job_cache': None
+}
+def _global_job_cache():
+    jc = _global['job_cache']
+    if jc is None:
+        feed = kp.load_feed('labbox-job-cache', create=True)
+        jc = hi.JobCache(feed_uri=feed.get_uri())
+        _global['job_cache'] = jc
+    return jc
+
 
 class LabboxContext:
     def __init__(self, worker_session):
         self._worker_session = worker_session
     def get_job_cache(self):
-        return job_cache
+        return _global_job_cache()
     def get_job_handler(self, job_handler_name):
         return self._worker_session._get_job_handler_from_name(job_handler_name)
 
@@ -32,7 +39,7 @@ class WorkerSession:
             partition3=hi.ParallelJobHandler(4),
             timeseries=hi.ParallelJobHandler(4)
         )
-        self._default_job_cache = job_cache
+        self._default_job_cache = _global_job_cache()
         self._labbox_context = LabboxContext(worker_session=self)
 
         self._default_feed_id = kp.get_feed_id(os.environ['LABBOX_DEFAULT_FEED_NAME'], create=True)

@@ -75,10 +75,6 @@ def main():
             print('Unable to load feed. Perhaps daemon is not running yet. Trying again in a few seconds.')
             time.sleep(5)
 
-    job_cache_path = os.environ['KACHERY_STORAGE_DIR'] + '/job-cache'
-    if not os.path.exists(job_cache_path):
-        os.mkdir(job_cache_path)
-
     async def incoming_message_handler(session, websocket):
         async for message in websocket:
             msg = json.loads(message)
