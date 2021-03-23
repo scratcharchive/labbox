@@ -2,51 +2,49 @@ import os
 import json
 import time
 import hashlib
-from typing import Dict, Set, Union
+from typing import Any, Callable, Dict, List, Set, Tuple, Union
 
-import hither as hi
-import kachery as ka
+import hither2 as hi2
 import kachery_p2p as kp
 import numpy as np
 
-_global = {
+_global: Dict[str, Any] = {
     'job_cache': None
 }
 def _global_job_cache():
     jc = _global['job_cache']
     if jc is None:
         feed = kp.load_feed('labbox-job-cache', create=True)
-        jc = hi.JobCache(feed_uri=feed.get_uri())
+        jc = hi2.JobCache(feed_uri=feed.get_uri())
         _global['job_cache'] = jc
     return jc
-
 
 class LabboxContext:
     def __init__(self, worker_session):
         self._worker_session = worker_session
-    def get_job_cache(self):
+    def get_job_cache(self) -> hi2.JobCache:
         return _global_job_cache()
-    def get_job_handler(self, job_handler_name):
+    def get_job_handler(self, job_handler_name) -> hi2.JobHandler:
         return self._worker_session._get_job_handler_from_name(job_handler_name)
 
 class WorkerSession:
-    def __init__(self, *, labbox_config):
+    def __init__(self, *, labbox_config, default_feed_name: str):
         self._labbox_config = labbox_config
         self._local_job_handlers = dict(
-            default=hi.ParallelJobHandler(4),
-            partition1=hi.ParallelJobHandler(4),
-            partition2=hi.ParallelJobHandler(4),
-            partition3=hi.ParallelJobHandler(4),
-            timeseries=hi.ParallelJobHandler(4)
+            default=hi2.ParallelJobHandler(4),
+            partition1=hi2.ParallelJobHandler(4),
+            partition2=hi2.ParallelJobHandler(4),
+            partition3=hi2.ParallelJobHandler(4),
+            timeseries=hi2.ParallelJobHandler(4)
         )
-        self._default_job_cache = _global_job_cache()
         self._labbox_context = LabboxContext(worker_session=self)
 
-        self._default_feed_id = kp.get_feed_id(os.environ['LABBOX_DEFAULT_FEED_NAME'], create=True)
+        default_feed_id = kp.get_feed_id(default_feed_name, create=True)
+        assert default_feed_id is not None
+        self._default_feed_id = default_feed_id
         self._readonly = False
-        self._jobs_by_id = {}
-        self._remote_job_handlers = {}
-        self._on_messages_callbacks = []
+        self._jobs_by_id: Dict[str, hi2.Job] = {}
+        self._on_messages_callbacks: List[Callable] = []
         self._subfeed_message_requests = {}
 
     def initialize(self):
@@ -72,7 +70,11 @@ class WorkerSession:
             kwargs = msg['kwargs']
             client_job_id = msg['clientJobId']
             try:
-                outer_job = hi.run(functionName, **kwargs, labbox=self._labbox_context)
+                f = hi2.get_function(functionName)
+                if f is not None:
+                    job_or_result = f(**kwargs, labbox=self._labbox_context)
+                else:
+                    raise Exception(f'Hither function not registered: {functionName}')
             except Exception as err:
                 self._send_message({
                     'type': 'hitherJobError',
@@ -82,21 +84,10 @@ class WorkerSession:
                     'runtime_info': None
                 })
                 return
-            try:
-                job_or_result = outer_job.wait()
-            except Exception as err:
-                self._send_message({
-                    'type': 'hitherJobError',
-                    'job_id': outer_job._job_id,
-                    'client_job_id': client_job_id,
-                    'error_message': str(err),
-                    'runtime_info': outer_job.get_runtime_info()
-                })
-                return
-            if hasattr(job_or_result, '_job_id'):
-                job = job_or_result
+            if isinstance(job_or_result, hi2.Job):
+                job: hi2.Job = job_or_result
                 setattr(job, '_client_job_id', client_job_id)
-                job_id = job._job_id
+                job_id = job.job_id
                 self._jobs_by_id[job_id] = job
                 print(f'======== Created hither job (2): {job_id} {functionName}')
                 self._send_message({
@@ -111,8 +102,8 @@ class WorkerSession:
                     'client_job_id': client_job_id,
                     'job_id': client_job_id,
                     # 'result': _make_json_safe(result),
-                    'result_sha1': ka.get_file_hash(ka.store_object(_make_json_safe(result))),
-                    'runtime_info': outer_job.get_runtime_info()
+                    'result_sha1': _get_sha1_from_uri(kp.store_json(_make_json_safe(result))),
+                    'runtime_info': {}
                 }
         elif type0 == 'hitherCancelJob':
             job_id = msg['job_id']
@@ -168,10 +159,10 @@ class WorkerSession:
                         if elapsed_msec > smr['wait_msec']:
                             msgs_for_client.append({
                                 'type': 'subfeedMessageRequestResponse',
-                                'requestId': watch_name,
+                                'requestId': smr_id,
                                 'numNewMessages': 0
                             })
-                            resolved_subfeed_message_requests.add(watch_name)
+                            resolved_subfeed_message_requests.add(smr_id)
                 if len(msgs_for_client) > 0:
                     self._send_messages(msgs_for_client)
                 for smr_id in resolved_subfeed_message_requests:
@@ -179,35 +170,37 @@ class WorkerSession:
             if not found_something:
                 break
         
-        hi.wait(0)
+        hi2.wait(0)
         job_ids = list(self._jobs_by_id.keys())
         for job_id in job_ids:
             job = self._jobs_by_id[job_id]
-            status0 = job.get_status()
-            if status0 == hi.JobStatus.FINISHED:
-                print(f'======== Finished hither job: {job_id} {job.get_label()}')
-                result = job.get_result()
-                runtime_info = job.get_runtime_info()
+            status0 = job.status
+            if status0 == 'finished':
+                print(f'======== Finished hither job: {job_id} {job.function_name} ({job.function_version})')
+                result = job.result
+                assert result is not None, 'Result of finished job is None'
+                # runtime_info = job.runtime_info
                 del self._jobs_by_id[job_id]
                 msg = {
                     'type': 'hitherJobFinished',
-                    'client_job_id': job._client_job_id,
+                    'client_job_id': getattr(job, '_client_job_id'),
                     'job_id': job_id,
                     # 'result': _make_json_safe(result),
-                    'result_sha1': ka.get_file_hash(ka.store_object(_make_json_safe(result))),
-                    'runtime_info': runtime_info
+                    'result_sha1': _get_sha1_from_uri(kp.store_json(_make_json_safe(result.return_value))),
+                    'runtime_info': {}
                 }
                 self._send_message(msg)
-            elif status0 == hi.JobStatus.ERROR:
-                exc = job.get_exception()
-                runtime_info = job.get_runtime_info()
+            elif status0 == 'error':
+                result= job.result
+                assert result is not None, 'Result of errored job is None'
+                # runtime_info = job.get_runtime_info()
                 del self._jobs_by_id[job_id]
                 msg = {
                     'type': 'hitherJobError',
                     'job_id': job_id,
-                    'client_job_id': job._client_job_id,
-                    'error_message': str(exc),
-                    'runtime_info': runtime_info
+                    'client_job_id': getattr(job, '_client_job_id'),
+                    'error_message': str(result.error),
+                    'runtime_info': {}
                 }
                 self._send_message(msg)
     def on_messages(self, callback):
@@ -221,20 +214,13 @@ class WorkerSession:
     def _get_job_handler_from_name(self, job_handler_name):
         assert job_handler_name in self._labbox_config['job_handlers'], f'Job handler not found in config: {job_handler_name}'
         a = self._labbox_config['job_handlers'][job_handler_name]
-        compute_resource_uri = self._labbox_config.get('compute_resource_uri', '')
         if a['type'] == 'local':
             jh = self._local_job_handlers[job_handler_name]
-        elif a['type'] == 'remote':
-            jh = self._get_remote_job_handler(job_handler_name=job_handler_name, uri=compute_resource_uri)
         else:
             raise Exception(f'Unexpected job handler type: {a["type"]}')
         return jh
-    def _get_remote_job_handler(self, job_handler_name, uri):
-        if job_handler_name not in self._remote_job_handlers:
-            self._remote_job_handlers[job_handler_name] = hi.RemoteJobHandler(compute_resource_uri=uri)
-        return self._remote_job_handlers[job_handler_name]
 
-def _make_json_safe(x):
+def _make_json_safe(x: Any):
     if isinstance(x, np.integer):
         return int(x)
     elif isinstance(x, np.floating):
@@ -287,3 +273,30 @@ def _sha1_of_string(txt: str) -> str:
 def _sha1_of_object(obj: object) -> str:
     txt = json.dumps(obj, sort_keys=True, separators=(',', ':'))
     return _sha1_of_string(txt)
+
+def _get_sha1_from_uri(uri: str) -> str:
+    protocol, algorithm, hash0, additional_path, query = _parse_kachery_uri(uri)
+    assert protocol == 'sha1'
+    assert algorithm == 'sha1'
+    return hash0
+
+def _parse_kachery_uri(uri: str) -> Tuple[str, str, str, str, dict]:
+    from urllib.parse import parse_qs
+    listA = uri.split('?')
+    if len(listA) > 1:
+        query = parse_qs(listA[1])
+    else:
+        query = {}
+    list0 = listA[0].split('/')
+    protocol = list0[0].replace(':', '')
+    hash0 = list0[2]
+    if '.' in hash0:
+        hash0 = hash0.split('.')[0]
+    additional_path = '/'.join(list0[3:])
+    algorithm = None
+    for alg in ['sha1', 'md5', 'key']:
+        if protocol.startswith(alg):
+            algorithm = alg
+    if algorithm is None:
+        raise Exception('Unexpected protocol: {}'.format(protocol))
+    return protocol, algorithm, hash0, additional_path, query

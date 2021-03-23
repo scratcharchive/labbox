@@ -2,13 +2,12 @@ import os
 import json
 from notebook.base.handlers import IPythonHandler
 from notebook.utils import url_path_join
-import kachery as ka
 import kachery_p2p as kp
 
 class Sha1Handler(IPythonHandler):
     def get(self):
         sha1 = self.request.path.split('/')[-1]
-        txt = ka.load_text(f'sha1://{sha1}')
+        txt = kp.load_text(f'sha1://{sha1}', p2p=False)
         if txt is None:
             raise Exception('Unable to load file.')
         self.finish(txt)
@@ -22,7 +21,7 @@ class FeedGetMessagesHandler(IPythonHandler):
         if feed_uri:
             feed = kp.load_feed(feed_uri)
         else:
-            feed = kp.load_feed(os.environ['LABBOX_DEFAULT_FEED_NAME'], create=True)
+            raise Exception('No feed_uri')
         subfeed = feed.get_subfeed(subfeed_name)
         subfeed.set_position(position)
         messages = subfeed.get_next_messages()
@@ -38,7 +37,7 @@ class FeedAppendMessagesHandler(IPythonHandler):
         if feed_uri:
             feed = kp.load_feed(feed_uri)
         else:
-            feed = kp.load_feed(os.environ['LABBOX_DEFAULT_FEED_NAME'], create=True)
+            raise Exception('No feed_uri')
         subfeed = feed.get_subfeed(subfeed_name)
         subfeed.append_messages(messages)
         txt = json.dumps({'success': True})

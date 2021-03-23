@@ -1,9 +1,9 @@
-__version__ = "0.1.27"
+__version__ = "0.1.31"
 
 import os
 import sys
 
-from .api._workersession import WorkerSession
+from .api._workersession import WorkerSession, LabboxContext
 from .serialize import serialize
 
 try:

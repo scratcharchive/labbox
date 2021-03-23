@@ -1,14 +1,12 @@
-import kachery_p2p as kp
-import hither as hi
 import time
 import multiprocessing
 
 class Session:
-    def __init__(self, *, labbox_config):
+    def __init__(self, *, labbox_config, default_feed_name: str):
         self._labbox_config = labbox_config
 
         pipe_to_parent, pipe_to_child = multiprocessing.Pipe()
-        self._worker_process =  multiprocessing.Process(target=_run_worker_session, args=(pipe_to_parent, labbox_config))
+        self._worker_process =  multiprocessing.Process(target=_run_worker_session, args=(pipe_to_parent, labbox_config, default_feed_name))
         self._worker_process.start()
         self._pipe_to_worker_process = pipe_to_child
         self._incoming_keepalive_timestamp = time.time()
@@ -42,9 +40,9 @@ class Session:
     def _handle_keepalive(self):
         self._incoming_keepalive_timestamp = time.time()
 
-def _run_worker_session(pipe_to_parent, labbox_config):
+def _run_worker_session(pipe_to_parent, labbox_config, default_feed_name: str):
     from ._workersession import WorkerSession
-    WS = WorkerSession(labbox_config=labbox_config)
+    WS = WorkerSession(labbox_config=labbox_config, default_feed_name=default_feed_name)
     def handle_messages(msgs):
         pipe_to_parent.send(dict(
             type='outgoing_messages',

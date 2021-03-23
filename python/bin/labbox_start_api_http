@@ -3,7 +3,7 @@
 import os
 from aiohttp import web
 import aiohttp_cors
-import kachery as ka
+import kachery_p2p as kp
 import json
 import sys
 
@@ -14,7 +14,7 @@ def main():
     async def sha1_handler(request):
         sha1 = str(request.rel_url).split('/')[2]
         uri = 'sha1://' + sha1
-        txt = ka.load_text(uri)
+        txt = kp.load_text(uri, p2p=False)
         if txt is not None:
             return web.Response(text=txt)
         else:
@@ -28,7 +28,7 @@ def main():
         if feed_uri:
             feed = kp.load_feed(feed_uri)
         else:
-            feed = kp.load_feed(os.environ['LABBOX_DEFAULT_FEED_NAME'], create=True)
+            raise Exception('No feed_uri')
         subfeed = feed.get_subfeed(subfeed_name)
         subfeed.set_position(position)
         messages = subfeed.get_next_messages(wait_msec=0) # important not to wait here because we don't want to tie up the limited http request connections
@@ -42,7 +42,7 @@ def main():
         if feed_uri:
             feed = kp.load_feed(feed_uri)
         else:
-            feed = kp.load_feed(os.environ['LABBOX_DEFAULT_FEED_NAME'], create=True)
+            raise Exception('No feed_uri')
         subfeed = feed.get_subfeed(subfeed_name)
         subfeed.append_messages(messages)
         return web.Response(text=json.dumps({'success': True}))

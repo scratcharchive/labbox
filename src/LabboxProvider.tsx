@@ -264,11 +264,14 @@ class SubfeedManager {
     _postHeaders() {
         // see https://pypi.org/project/jupyter-openbis-server/
         const xsrf_token = Cookie.get('_xsrf')
-        if (!xsrf_token) throw Error('No _xsrf cookie found')
-        return {
-            "X-XSRFToken": xsrf_token,
-            "credentials": "same-origin"
+        if (xsrf_token) {
+            if (!xsrf_token) throw Error('No _xsrf cookie found')
+            return {
+                "X-XSRFToken": xsrf_token,
+                "credentials": "same-origin"
+            }
         }
+        else return {}
     }
 }
 

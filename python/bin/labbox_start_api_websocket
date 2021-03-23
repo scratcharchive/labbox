@@ -2,9 +2,6 @@
 
 import os
 import sys
-from aiohttp import web
-import aiohttp_cors
-import kachery as ka
 thisdir = os.path.dirname(os.path.realpath(__file__))
 
 # # this is how the python functions in the extensions get registered
@@ -24,7 +21,7 @@ import traceback
 import urllib3
 import yaml
 
-import hither as hi
+import hither2 as hi2
 import kachery_p2p as kp
 import websockets
 from labbox.api import Session
@@ -69,10 +66,10 @@ def main():
     nodes_with_access = labbox_config.get('nodes_with_access', [])
     while True:
         try:
-            default_feed = kp.load_feed(os.environ['LABBOX_DEFAULT_FEED_NAME'], create=True)
+            node_id = kp.get_node_id()
             break
         except:
-            print('Unable to load feed. Perhaps daemon is not running yet. Trying again in a few seconds.')
+            print('Unable to connect to daemon. Perhaps daemon is not running yet. Trying again in a few seconds.')
             time.sleep(5)
 
     async def incoming_message_handler(session, websocket):
@@ -83,7 +80,7 @@ def main():
     async def outgoing_message_handler(session, websocket):
         while True:
             try:
-                hi.wait(0)
+                hi2.wait(0)
             except:
                 traceback.print_exc()
             messages = session.check_for_outgoing_messages()
@@ -97,7 +94,8 @@ def main():
     # Thanks: https://websockets.readthedocs.io/en/stable/intro.html
     async def connection_handler(websocket, path):
         session = Session(
-            labbox_config=labbox_config
+            labbox_config=labbox_config,
+            default_feed_name=os.environ['LABBOX_DEFAULT_FEED_NAME']
         )
         task1 = asyncio.ensure_future(
             incoming_message_handler(session, websocket))
