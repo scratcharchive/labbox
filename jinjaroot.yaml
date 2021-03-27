@@ -1,0 +1,8 @@
+projectName: labbox
+projectVersion: 0.1.31
+projectAuthor: Jeremy Magland and Jeff Soules
+projectAuthorEmail: jmagland@flatironinstitute.org
+projectDescription:
+projectUrl: https://github.com/flatironinstitute/labbox
+projectBugTrackerUrl: https://github.com/flatironinstitute/labbox/issues
+pythonPackageDir: ./python

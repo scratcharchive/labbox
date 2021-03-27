@@ -4,12 +4,6 @@ import os.path
 import setuptools
 
 setuptools.setup(
-    name='labbox',
-    version='0.1.31',
-    author="Jeremy Magland",
-    author_email="jmagland@flatironinstitute.org",
-    description="",
-    url="https://github.com/flatironinstitute/labbox",
     packages=setuptools.find_packages(),
     include_package_data=True,
     scripts=[
@@ -24,10 +18,5 @@ setuptools.setup(
         'pyyaml',
         'aiohttp',
         'aiohttp_cors'
-    ],
-    classifiers=[
-        "Programming Language :: Python :: 3",
-        "License :: OSI Approved :: Apache Software License",
-        "Operating System :: OS Independent",
     ]
 )
