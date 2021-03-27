@@ -27,7 +27,7 @@ npm run publish-dry
 
 # Confirm publish
 while true; do
-    read -p "Publish version 0.1.31 (y/n)?" yn
+    read -p "Publish version 0.1.32-dev1 (y/n)?" yn
     case $yn in
         [Yy]* ) break;;
         [Nn]* ) echo "aborting"; exit;;
