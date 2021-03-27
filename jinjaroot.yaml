@@ -6,3 +6,4 @@ projectDescription:
 projectUrl: https://github.com/flatironinstitute/labbox
 projectBugTrackerUrl: https://github.com/flatironinstitute/labbox/issues
 pythonPackageDir: ./python
+npmPackageDir: .

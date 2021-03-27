@@ -18,6 +18,8 @@ jinjaroot verify
 # run pre-publish-tasks.sh
 .vscode/tasks/pre-publish-tasks.sh
 
+cd .
+
 # install and build
 yarn install
 yarn build
@@ -35,7 +37,5 @@ while true; do
     esac
 done
 
-
 # publish
 npm run publish-go
-
