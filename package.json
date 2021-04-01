@@ -1,6 +1,6 @@
 {
   "name": "labbox",
-  "version": "0.1.32-dev1",
+  "version": "0.1.32",
   "description": "",
   "main": "lib/index.js",
   "scripts": {
