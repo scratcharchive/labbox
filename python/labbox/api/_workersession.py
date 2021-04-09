@@ -46,6 +46,7 @@ class WorkerSession:
         self._jobs_by_id: Dict[str, hi2.Job] = {}
         self._on_messages_callbacks: List[Callable] = []
         self._subfeed_message_requests = {}
+        self._log = hi2.Log()
 
     def initialize(self):
         node_id = kp.get_node_id()
@@ -72,7 +73,8 @@ class WorkerSession:
             try:
                 f = hi2.get_function(functionName)
                 if f is not None:
-                    job_or_result = f(**kwargs, labbox=self._labbox_context)
+                    with hi2.Config(log=self._log):
+                        job_or_result = f(**kwargs, labbox=self._labbox_context)
                 else:
                     raise Exception(f'Hither function not registered: {functionName}')
             except Exception as err:
