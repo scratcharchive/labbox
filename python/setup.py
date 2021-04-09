@@ -12,8 +12,8 @@ setuptools.setup(
     ],
     install_requires=[
         'numpy',
-        'hither>=0.5.11',
-        'kachery-p2p>=0.8.10',
+        'hither>=0.5.15',
+        'kachery-p2p>=0.8.14',
         'websockets',
         'pyyaml',
         'aiohttp',
