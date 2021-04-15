@@ -27,8 +27,24 @@ class LabboxContext:
     def get_job_handler(self, job_handler_name) -> hi2.JobHandler:
         return self._worker_session._get_job_handler_from_name(job_handler_name)
 
+class LogEvent:
+    def __init__(self, label: str, data: dict):
+        self._timestamp = time.time()
+        self._label = label
+        self._data = data
+    @property
+    def label(self):
+        return self._label
+    @property
+    def data(self):
+        return self._data
+    @property
+    def timestamp(self):
+        return self._timestamp
+
 class WorkerSession:
     def __init__(self, *, labbox_config, default_feed_name: str):
+        self._log_events: List[LogEvent] = []
         self._labbox_config = labbox_config
         self._local_job_handlers = dict(
             default=hi2.ParallelJobHandler(4),
@@ -46,7 +62,7 @@ class WorkerSession:
         self._jobs_by_id: Dict[str, hi2.Job] = {}
         self._on_messages_callbacks: List[Callable] = []
         self._subfeed_message_requests = {}
-        self._log = hi2.Log()
+        self._hither_log = hi2.Log()
 
     def initialize(self):
         node_id = kp.get_node_id()
@@ -60,20 +76,28 @@ class WorkerSession:
             'type': 'reportServerInfo',
             'serverInfo': server_info
         }
+        self._log(f'initialize node_id={node_id}', msg)
         self._send_message(msg)
     def cleanup(self):
         # todo
         pass
+    def _log(self, label: str, data: dict={}):
+        if os.getenv('LABBOX_DEBUG', None) == '1':
+            self._log_events.append(LogEvent(label=label, data=data))
+    @property
+    def log_events(self):
+        return self._log_events
     def handle_message(self, msg):
         type0 = msg.get('type')
         if type0 == 'hitherCreateJob':
             functionName = msg['functionName']
             kwargs = msg['kwargs']
             client_job_id = msg['clientJobId']
+            self._log(f'hitherCreateJob-1 {functionName} {client_job_id}')
             try:
                 f = hi2.get_function(functionName)
                 if f is not None:
-                    with hi2.Config(log=self._log):
+                    with hi2.Config(log=self._hither_log):
                         job_or_result = f(**kwargs, labbox=self._labbox_context)
                 else:
                     raise Exception(f'Hither function not registered: {functionName}')
@@ -92,12 +116,14 @@ class WorkerSession:
                 job_id = job.job_id
                 self._jobs_by_id[job_id] = job
                 print(f'======== Created hither job (2): {job_id} {functionName}')
+                self._log(f'hitherCreateJob-2 {functionName} {client_job_id} {job_id}')
                 self._send_message({
                     'type': 'hitherJobCreated',
                     'job_id': job_id,
                     'client_job_id': client_job_id
                 })
             else:
+                self._log(f'hitherCreateJob-3 {functionName} {client_job_id}')
                 result = job_or_result
                 msg = {
                     'type': 'hitherJobFinished',
@@ -109,6 +135,7 @@ class WorkerSession:
                 }
         elif type0 == 'hitherCancelJob':
             job_id = msg['job_id']
+            self._log(f'hitherCancelJob-1 {job_id}')
             assert job_id, 'Missing job_id'
             assert job_id in self._jobs_by_id, f'No job with id: {job_id}'
             job = self._jobs_by_id[job_id]
@@ -120,6 +147,7 @@ class WorkerSession:
             subfeed_name = msg['subfeedName']
             position = msg['position']
             wait_msec = msg['waitMsec']
+            self._log(f'subfeed_message_request-1 {request_id} {feed_uri} {subfeed_name} {position} {wait_msec}')
             self._subfeed_message_requests[request_id] = {
                 'feed_uri': feed_uri,
                 'subfeed_name': subfeed_name,
@@ -129,6 +157,7 @@ class WorkerSession:
             }
 
     def iterate(self):
+        self._log('iterate')
         while True:
             found_something = False
             subfeed_message_request_ids = list(self._subfeed_message_requests.keys())
@@ -148,6 +177,7 @@ class WorkerSession:
                     num_new_messages = len(messages[watch_name])
                     if num_new_messages > 0:
                         found_something = True
+                        self._log(f'subfeed_message_request-response-1 {watch_name} {num_new_messages}')
                         msgs_for_client.append({
                             'type': 'subfeedMessageRequestResponse',
                             'requestId': watch_name,
@@ -159,6 +189,7 @@ class WorkerSession:
                         smr = self._subfeed_message_requests[smr_id]
                         elapsed_msec = (time.time() - smr['timestamp']) * 1000
                         if elapsed_msec > smr['wait_msec']:
+                            self._log(f'subfeed_message_request-response-2 {smr_id} {0}')
                             msgs_for_client.append({
                                 'type': 'subfeedMessageRequestResponse',
                                 'requestId': smr_id,
@@ -183,9 +214,11 @@ class WorkerSession:
                 assert result is not None, 'Result of finished job is None'
                 # runtime_info = job.runtime_info
                 del self._jobs_by_id[job_id]
+                client_job_id = getattr(job, '_client_job_id')
+                self._log(f'hitherJobFinished-1 {client_job_id} {job_id}')
                 msg = {
                     'type': 'hitherJobFinished',
-                    'client_job_id': getattr(job, '_client_job_id'),
+                    'client_job_id': client_job_id,
                     'job_id': job_id,
                     # 'result': _make_json_safe(result),
                     'result_sha1': _get_sha1_from_uri(kp.store_json(_make_json_safe(result.return_value))),
@@ -197,10 +230,12 @@ class WorkerSession:
                 assert result is not None, 'Result of errored job is None'
                 # runtime_info = job.get_runtime_info()
                 del self._jobs_by_id[job_id]
+                client_job_id = getattr(job, '_client_job_id')
+                self._log(f'hitherJobError-1 {client_job_id} {job_id}')
                 msg = {
                     'type': 'hitherJobError',
                     'job_id': job_id,
-                    'client_job_id': getattr(job, '_client_job_id'),
+                    'client_job_id': client_job_id,
                     'error_message': str(result.error),
                     'runtime_info': {}
                 }
